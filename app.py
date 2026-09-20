@@ -1,9 +1,11 @@
+import csv
 import glob
+import io
 import os
 import uuid
 from datetime import datetime, timezone
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request
 
 import ai
 import calibre
@@ -78,7 +80,7 @@ def do_import():
 
 @app.get("/api/library")
 def library():
-    return jsonify(books())
+    return jsonify([owned(b) for b in books()])
 
 
 @app.get("/api/calibre")
@@ -201,6 +203,16 @@ def prioritize():
 @app.get("/api/list")
 def get_list():
     return jsonify([owned(i) for i in store.load("list.json", [])])
+
+
+@app.get("/api/list.csv")
+def list_csv():
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["Position", "Title", "Author", "Status", "In Calibre", "Why", "Note"])
+    for n, i in enumerate((owned(i) for i in store.load("list.json", [])), 1):
+        w.writerow([n, i["title"], i["author"], i["status"], "yes" if i["owned"] else "", i.get("reason", ""), i.get("note", "")])
+    return Response(out.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=reading-list.csv"})
 
 
 @app.post("/api/list")
