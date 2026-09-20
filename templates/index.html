@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reading List</title>
+<style>
+:root{--bg:#f6f5f1;--card:#fff;--ink:#1d1d1b;--mute:#6b6a64;--line:#e3e1d9;--acc:#8a4b2a;--acc-ink:#fff;--ok:#2f7d4f;--bad:#a63d2f}
+@media (prefers-color-scheme:dark){:root{--bg:#171614;--card:#211f1c;--ink:#ecebe6;--mute:#9a988f;--line:#34322d;--acc:#d08a5c;--acc-ink:#1a1206;--ok:#6cc58f;--bad:#e08375}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:16px;max-width:1000px;margin:auto}
+h1{font:600 20px/1 Georgia,serif;margin:0}
+main{max-width:1000px;margin:auto;padding:0 16px 48px}
+nav{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:16px}
+nav button{background:none;border:0;color:var(--mute);padding:10px 14px;cursor:pointer;font:inherit;border-bottom:2px solid transparent}
+nav button.on{color:var(--ink);border-color:var(--acc)}
+button.b,label.b{background:var(--acc);color:var(--acc-ink);border:0;border-radius:6px;padding:7px 12px;cursor:pointer;font:inherit;font-size:13px}
+button.g{background:none;border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:5px 9px;cursor:pointer;font:inherit;font-size:13px}
+button:disabled{opacity:.5;cursor:wait}
+input[type=text],select{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:7px 10px;font:inherit}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center}.bar input[type=text]{flex:1;min-width:180px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:10px;display:flex;gap:12px}
+.card img,.ph{width:52px;height:78px;object-fit:cover;border-radius:3px;background:var(--line);flex:none}
+.card .t{font-weight:600}.card .m{color:var(--mute);font-size:13px}.card .why{margin:4px 0 8px}
+.card .act{display:flex;gap:6px;flex-wrap:wrap}.grow{flex:1;min-width:0}
+.pill{display:inline-block;font-size:12px;padding:1px 8px;border-radius:99px;border:1px solid var(--line);color:var(--mute);margin-right:4px}
+.note{color:var(--mute);font-size:13px;margin:0 0 12px}.warn{color:var(--bad)}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}th{color:var(--mute);font-weight:500}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}.grid .card{display:block}
+h3{margin:0 0 6px;font-size:14px;color:var(--mute);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+ul.c{margin:0;padding-left:18px}.rank{font:600 18px Georgia,serif;color:var(--acc);width:28px;flex:none}
+.links a{font-size:12px;color:var(--acc);margin-right:10px}
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:6px;opacity:0;transition:opacity .2s;pointer-events:none}#toast.on{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <h1>Reading List</h1>
+  <div><span id="meta" class="note" style="margin:0 8px 0 0"></span>
+  <label class="b">Import Goodreads CSV<input id="file" type="file" accept=".csv" hidden></label></div>
+</header>
+<main>
+  <nav id="tabs"></nav>
+  <div id="view"></div>
+</main>
+<div id="toast"></div>
+<script>
+const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let cfg={}, tab='list', lib=[], list=[], prefs={more:'',less:'',notes:''};
+const TABS={list:'Reading list',discover:'Discover',next:'Read next',library:'Library',taste:'Taste'};
+const api=async(u,o={})=>{const r=await fetch(u,o.body&&!(o.body instanceof FormData)?{...o,headers:{'content-type':'application/json'},body:JSON.stringify(o.body)}:o);
+  if(r.status===204)return null;const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.statusText);return j};
+const toast=m=>{const t=$('#toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),2800)};
+const busy=async(btn,fn)=>{btn.disabled=true;const o=btn.textContent;btn.textContent='Working…';try{await fn()}catch(e){toast(e.message)}finally{btn.disabled=false;btn.textContent=o}};
+const onList=(t,a)=>list.some(i=>i.title.toLowerCase()===t.toLowerCase()&&i.author.toLowerCase()===a.toLowerCase());
+const cover=c=>c?`<img src="${esc(c)}" alt="" loading="lazy">`:'<div class="ph"></div>';
+function shelfmark(t,a){navigator.clipboard?.writeText(`${t} ${a}`);window.open(cfg.shelfmark_url,'_blank');toast('Copied "'+t+' '+a+'" — paste it into ShelfMark search')}
+function addBtn(t,a,extra={}){return `<button class="b" data-add='${esc(JSON.stringify({title:t,author:a,...extra}))}'>${onList(t,a)?'On list':'+ Add to list'}</button>`}
+const grq=(t,a)=>`https://www.goodreads.com/search?q=${encodeURIComponent(t+' '+a)}`;
+function links(t,a,x={}){const l=(u,n)=>`<a href="${esc(u)}" target="_blank" rel="noopener">${n}</a>`;
+  return `<div class="links">${l(x.gr_id?`https://www.goodreads.com/book/show/${x.gr_id}`:grq(t,a),'Goodreads')}${x.ol_key?l('https://openlibrary.org'+x.ol_key,'Open Library'):''}</div>`}
+const fb=(t,a,v,label)=>`<button class="g" data-fb='${esc(JSON.stringify({title:t,author:a,verdict:v}))}'>${label}</button>`;
+const prefsBar=()=>`<div class="card" style="display:block"><h3>Your preferences</h3>
+  <div class="bar" style="margin-bottom:6px"><input id="pm" type="text" placeholder="More of… e.g. historical fiction, ancient empires, Silk Road" value="${esc(prefs.more)}">
+  <input id="pl" type="text" placeholder="Less of… e.g. science fiction" value="${esc(prefs.less)}"><button class="g" id="ps">Save</button></div>
+  <p class="note" style="margin:0">Applied to every recommendation and ranking, and wins over what your library history suggests. 👍 / Not for me on any book teaches it too.</p></div>`;
+const savePrefs=async()=>{prefs={...prefs,more:$('#pm').value,less:$('#pl').value};await api('/api/prefs',{method:'PUT',body:prefs})};
+function wirePrefs(){$('#ps').onclick=e=>busy(e.target,async()=>{await savePrefs();toast('Preferences saved')})}
+function sm(t,a){return `<button class="g" data-sm='${esc(JSON.stringify([t,a]))}'>ShelfMark</button>`}
+
+async function init(){
+  cfg=await api('/api/config');
+  $('#meta').textContent=cfg.book_count?`${cfg.book_count} books · imported ${new Date(cfg.imported).toLocaleDateString()}`:'No library yet';
+  $('#tabs').innerHTML=Object.entries(TABS).map(([k,v])=>`<button data-tab="${k}" class="${k===tab?'on':''}">${v}</button>`).join('');
+  [lib,list,prefs]=await Promise.all([api('/api/library'),api('/api/list'),api('/api/prefs')]);
+  render();
+}
+async function render(){
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===tab));
+  $('#view').innerHTML='';await VIEWS[tab]($('#view'));
+}
+const noKey=()=>cfg.backend?'':`<p class="note warn">No AI backend — set <code>ANTHROPIC_API_KEY</code> in <code>.env</code>, or make Claude Code available to the container.</p>`;
+
+const VIEWS={
+async list(el){
+  if(!list.length){el.innerHTML='<p class="note">Your list is empty. Add books from Discover, Read next, or the Library.</p>';return}
+  el.innerHTML=list.map((i,n)=>`<div class="card"><div class="rank">${n+1}</div>${cover(i.cover)}<div class="grow">
+    <div class="t">${esc(i.title)}</div><div class="m">${esc(i.author)} <span class="pill">${esc(i.status)}</span></div>
+    ${i.reason?`<div class="why">${esc(i.reason)}</div>`:''}${links(i.title,i.author,i)}
+    <div class="act" style="margin-top:6px">${sm(i.title,i.author)}
+    <select data-st="${i.id}">${['queued','reading','done'].map(s=>`<option ${s===i.status?'selected':''}>${s}</option>`).join('')}</select>
+    <button class="g" data-mv="${i.id}" data-to="top">Top</button><button class="g" data-mv="${i.id}" data-to="up">↑</button><button class="g" data-mv="${i.id}" data-to="down">↓</button>
+    <button class="g" data-rm="${i.id}">Remove</button></div></div></div>`).join('');
+},
+async discover(el){
+  const recs=await api('/api/recs');
+  el.innerHTML=`${noKey()}${prefsBar()}<div class="bar" style="margin-top:12px"><input id="focus" type="text" placeholder="Optional focus, e.g. ancient Persia, or lighter sci-fi"><button class="b" id="go">Get recommendations</button></div>
+   <p class="note">Suggestions come from Claude using your Goodreads profile, are checked against Open Library, and skip anything already in your library.</p>`+
+   (recs.length?recs.slice().reverse().map(r=>`<div class="card">${cover(r.cover)}<div class="grow"><div class="t">${esc(r.title)}</div>
+    <div class="m">${esc(r.author)}${r.series?' · '+esc(r.series):''}${r.year?' · '+r.year:''}${r.pages?' · '+r.pages+' pp':''}${r.verified===null?' · <span class="warn">unverified</span>':''}</div>
+    <div class="why">${esc(r.why)}</div>${(r.similar_to||[]).length?`<div class="m">Like: ${r.similar_to.map(esc).join(', ')}</div>`:''}${links(r.title,r.author,r)}
+    <div class="act" style="margin-top:8px">${addBtn(r.title,r.author,{cover:r.cover,reason:r.why,ol_key:r.ol_key})}${sm(r.title,r.author)}${fb(r.title,r.author,'like','👍 More like this')}<button class="g" data-dis="${r.id}">Not for me</button></div></div></div>`).join(''):'<p class="note">No recommendations yet.</p>');
+  wirePrefs();
+  $('#go').onclick=e=>busy(e.target,async()=>{await savePrefs();const r=await api('/api/recommend',{method:'POST',body:{focus:$('#focus').value}});
+    toast(`${r.added} new (${r.already_owned} already owned, ${r.unverified} unverifiable)`);render()});
+},
+async next(el){
+  const p=await api('/api/prioritized');
+  const top=p.items.filter(i=>i.rank!=null),skip=p.items.filter(i=>i.rank==null);
+  el.innerHTML=`${noKey()}${prefsBar()}<div class="bar" style="margin-top:12px"><button class="b" id="go">${p.created?'Re-rank':'Rank'} my to-read queue</button>
+   <span class="note" style="margin:0">${p.created?'Ranked '+new Date(p.created).toLocaleString():'Claude picks what to read next from your Goodreads to-read shelf.'}</span></div>`+
+   top.map(i=>`<div class="card"><div class="rank">${i.rank}</div><div class="grow"><div class="t">${esc(i.title)}</div><div class="m">${esc(i.author)}${i.genre?` <span class="pill">${esc(i.genre)}</span>`:''}</div><div class="why">${esc(i.reason)}</div>${links(i.title,i.author,{gr_id:i.id})}
+    <div class="act" style="margin-top:6px">${addBtn(i.title,i.author,{reason:i.reason,gr_id:i.id})}${sm(i.title,i.author)}${fb(i.title,i.author,'like','👍 More like this')}${fb(i.title,i.author,'dislike','Not for me')}</div></div></div>`).join('')+
+   (skip.length?`<h3 style="margin-top:20px">Probably skip</h3>`+skip.map(i=>`<div class="card"><div class="grow"><div class="t">${esc(i.title)}</div><div class="m">${esc(i.author)}</div><div class="why">${esc(i.reason)}</div></div></div>`).join(''):'');
+  wirePrefs();
+  $('#go').onclick=e=>busy(e.target,async()=>{await savePrefs();await api('/api/prioritize',{method:'POST'});render()});
+},
+async library(el){
+  el.innerHTML=`<div class="bar"><input id="q" type="text" placeholder="Search title or author"><select id="st"><option value="">All</option><option>to-read</option><option>read</option><option>dnf</option><option>reading</option></select></div><table><thead><tr><th>Title</th><th>Author</th><th>Status</th><th>★</th><th></th></tr></thead><tbody id="rows"></tbody></table>`;
+  const draw=()=>{const q=$('#q').value.toLowerCase(),s=$('#st').value;
+    const rows=lib.filter(b=>(!s||b.status===s)&&(b.title+' '+b.author).toLowerCase().includes(q)).slice(0,300);
+    $('#rows').innerHTML=rows.map(b=>`<tr><td><a href="https://www.goodreads.com/book/show/${esc(b.id)}" target="_blank" rel="noopener" style="color:inherit">${esc(b.title)}</a>${b.series?` <span class="m">(${esc(b.series)} #${esc(b.series_num)})</span>`:''}</td><td>${esc(b.author)}</td><td>${b.status}</td><td>${b.rating||''}</td>
+      <td>${b.status==='to-read'?addBtn(b.title,b.author):''}</td></tr>`).join('')};
+  $('#q').oninput=draw;$('#st').onchange=draw;draw();
+},
+async taste(el){
+  const p=await api('/api/profile'),c=p.counts||{};
+  el.innerHTML=`<div class="grid">
+   <div class="card"><div><h3>Library</h3>${Object.entries(c).map(([k,v])=>`${k}: <b>${v}</b>`).join(' · ')}<br><span class="m">Median finished length ${p.median_pages_finished} pages</span></div></div>
+   <div class="card"><div><h3>Most-read authors</h3><ul class="c">${p.top_authors.slice(0,12).map(a=>`<li>${esc(a.author)} — ${a.read}${a.avg?` (avg ${a.avg})`:''}</li>`).join('')}</ul></div></div>
+   <div class="card"><div><h3>Abandoned</h3><ul class="c">${p.dnf.slice(0,12).map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div></div>
+   <div class="card"><div><h3>Series in progress</h3><ul class="c">${p.series_in_progress.slice(0,12).map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div></div>
+   <div class="card"><div><h3>Shelves</h3>${Object.entries(p.shelves).map(([k,v])=>`<span class="pill">${esc(k)} ${v}</span>`).join('')}</div></div></div>`;
+}};
+
+document.addEventListener('click',async e=>{
+  const t=e.target,d=t.dataset;
+  if(d.tab){tab=d.tab;render()}
+  else if(d.add){const b=JSON.parse(d.add);await busy(t,async()=>{await api('/api/list',{method:'POST',body:b});list=await api('/api/list');t.textContent='On list'})}
+  else if(d.sm){shelfmark(...JSON.parse(d.sm))}
+  else if(d.mv){await api(`/api/list/${d.mv}/move`,{method:'POST',body:{to:d.to}});list=await api('/api/list');render()}
+  else if(d.rm){await api(`/api/list/${d.rm}`,{method:'DELETE'});list=await api('/api/list');render()}
+  else if(d.fb){const f=JSON.parse(d.fb);await api('/api/feedback',{method:'POST',body:f});toast(f.verdict==='like'?'Noted — will find more like this':'Hidden, and won\'t be suggested again');render()}
+  else if(d.dis){await api(`/api/recs/${d.dis}`,{method:'DELETE'});render()}
+});
+document.addEventListener('change',async e=>{
+  if(e.target.dataset.st){await api(`/api/list/${e.target.dataset.st}`,{method:'PATCH',body:{status:e.target.value}});list=await api('/api/list');render()}
+});
+$('#file').onchange=async e=>{const fd=new FormData();fd.append('file',e.target.files[0]);
+  try{const r=await api('/api/import',{method:'POST',body:fd});toast(`Imported ${r.imported} books`);await init()}catch(x){toast(x.message)}};
+init();
+</script>
+</body>
+</html>
