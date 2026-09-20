@@ -7,12 +7,14 @@ services:
     environment:
       - TZ=America/Chicago
       - PORT=5000
-      - SHELFMARK_URL=http://holobooks.local:8085
+      - SHELFMARK_URL=http://192.168.1.231:8085
+      - CALIBRE_DB=/calibre/metadata.db
       - CLAUDE_BIN=/root/.local/bin/claude
       - HOME=/root
       - CLAUDE_CONFIG_DIR=/root/.claude
     volumes:
       - /Quarks/Data/Dockers/reading-list:/data
+      - /Quarks/Data/VMVD/Completed/Books/metadata.db:/calibre/metadata.db:ro  # Calibre library, read-only
       # Claude Code CLI + its login, so AI features work without an API key. The host binary is glibc-compatible
       # with the image. ~/.claude is mounted read-write so token refreshes land in the one shared credentials file.
       - /root/.local/share/claude:/root/.local/share/claude:ro

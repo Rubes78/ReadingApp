@@ -6,11 +6,12 @@ from datetime import datetime, timezone
 from flask import Flask, jsonify, render_template, request
 
 import ai
+import calibre
 import goodreads
 import store
 
 app = Flask(__name__)
-SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "http://holobooks.local:8085")
+SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "http://192.168.1.231:8085")
 
 
 def now():
@@ -39,6 +40,11 @@ def context(b):
         store.load("prefs.json", {}), store.load("feedback.json", []), store.load("list.json", []))
 
 
+def owned(item):
+    """Copy of a book dict flagged with whether it is already in the Calibre library."""
+    return {**item, "owned": calibre.owns(item["title"], item["author"])}
+
+
 def err(msg, code=400):
     return jsonify(error=msg), code
 
@@ -53,7 +59,7 @@ def config():
     books()  # triggers the first-run CSV import
     lib = store.load("library.json", {})
     return jsonify(backend=ai.backend(), model=ai.MODEL, shelfmark_url=SHELFMARK_URL,
-                   imported=lib.get("imported"), book_count=len(lib.get("books", [])))
+                   imported=lib.get("imported"), book_count=len(lib.get("books", [])), calibre_count=len(calibre.books()))
 
 
 @app.post("/api/import")
@@ -75,6 +81,11 @@ def library():
     return jsonify(books())
 
 
+@app.get("/api/calibre")
+def calibre_books():
+    return jsonify(calibre.books())
+
+
 @app.get("/api/profile")
 def profile():
     p = goodreads.build_profile(books())
@@ -86,7 +97,7 @@ def profile():
 
 @app.get("/api/recs")
 def recs():
-    return jsonify([r for r in store.load("recs.json", []) if not r.get("dismissed")])
+    return jsonify([owned(r) for r in store.load("recs.json", []) if not r.get("dismissed")])
 
 
 @app.post("/api/recommend")
@@ -97,7 +108,7 @@ def recommend():
     body = request.get_json(silent=True) or {}
     try:
         found, stats = ai.recommend(goodreads.profile_text(goodreads.build_profile(b)),
-                                    {k for x in b for k in (x["key"], x.get("skey")) if k}, (body.get("focus") or "").strip()[:200],
+                                    {k for x in b for k in (x["key"], x.get("skey")) if k} | calibre.keys(), (body.get("focus") or "").strip()[:200],
                                     min(int(body.get("count", 12)), 25))
     except ai.AIError as e:
         return err(str(e), 502)
@@ -163,7 +174,8 @@ def feedback():
 
 @app.get("/api/prioritized")
 def prioritized():
-    return jsonify(store.load("prioritized.json", {"created": None, "items": []}))
+    d = store.load("prioritized.json", {"created": None, "items": []})
+    return jsonify({**d, "items": [owned(i) for i in d["items"]]})
 
 
 @app.post("/api/prioritize")
@@ -188,7 +200,7 @@ def prioritize():
 
 @app.get("/api/list")
 def get_list():
-    return jsonify(store.load("list.json", []))
+    return jsonify([owned(i) for i in store.load("list.json", [])])
 
 
 @app.post("/api/list")
